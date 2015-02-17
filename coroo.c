@@ -192,10 +192,7 @@ static void wait_for_events() {
 			threads[i] = t;
 			originals[i] = desc;
 			effectives[i] = *desc;
-			if (t->poll_expiration == 0) {
-				timeout = 0;
-			}
-			if (t->poll_expiration > 0) {
+			if (t->poll_expiration >= 0) {
 				int64_t remaining = t->poll_expiration - now;
 				if (remaining <= 0)
 					timeout = 0;
@@ -212,8 +209,7 @@ static void wait_for_events() {
 		CorooThread *t = threads[i];
 		struct pollfd *desc = &effectives[i];
 		bool ack = desc->revents ||
-			t->poll_expiration == 0 ||
-			(t->poll_expiration > 0 && now >= t->poll_expiration);
+			(t->poll_expiration >= 0 && now >= t->poll_expiration);
 		if (ack) {
 			originals[i]->revents = desc->revents;
 			if (!t->poll_acked) {
