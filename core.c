@@ -19,12 +19,6 @@ typedef enum {
 	STACK_DIRECTION_DOWN,
 } StackDirection;
 
-typedef enum {
-	POLL_EXPIRATION_IMMEDIATE,
-	POLL_EXPIRATION_SPECIFIED,
-	POLL_EXPIRATION_INFINITE,
-} PollExpiration;
-
 typedef struct ListElement {
 	struct ListElement *prev, *next;
 } ListElement;
@@ -38,8 +32,7 @@ struct CorooThread {
 	jmp_buf thread_state;
 	struct pollfd *poll_descs;
 	nfds_t poll_descs_count;
-	PollExpiration poll_expiration_type;
-	struct timespec poll_expiration;
+	int64_t poll_expiration;
 	bool poll_acked;
 	// initialized by coroo_thread_start
 	void *stack_base;
@@ -94,6 +87,12 @@ static ListElement *list_pop_front(List *list) {
 
 static ListElement *list_pop_back(List *list) {
 	return list_remove(list->anchor.prev);
+}
+
+static int64_t get_time_millis() {
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	return (int64_t)now.tv_sec * 1000 + (int64_t)now.tv_nsec / 1000000;
 }
 
 static void maybe_clobber_pointer(void **ptr) {
@@ -184,6 +183,8 @@ static void wait_for_events() {
 	struct pollfd **originals = malloc(nfds * sizeof(*originals));
 	struct pollfd *effectives = malloc(nfds * sizeof(*effectives));
 	// populate tables
+	int64_t now = get_time_millis();
+	int64_t timeout = -1;
 	nfds_t i = 0;
 	for (e = anchor->next; e != anchor; e = e->next) {
 		CorooThread *t = list_entry(e, CorooThread, list_elem);
@@ -193,15 +194,29 @@ static void wait_for_events() {
 			threads[i] = t;
 			originals[i] = desc;
 			effectives[i] = *desc;
+			if (t->poll_expiration == 0) {
+				timeout = 0;
+			}
+			if (t->poll_expiration > 0) {
+				int64_t remaining = t->poll_expiration - now;
+				if (remaining <= 0)
+					timeout = 0;
+				else
+					timeout = (remaining < timeout || timeout < 0) ? remaining : timeout;
+			}
 		}
 	}
 	// do the poll
-	poll(effectives, nfds, -1);
+	poll(effectives, nfds, timeout);
+	now = get_time_millis();
 	// dispatch results
 	for (i = 0; i < nfds; i++) {
 		CorooThread *t = threads[i];
 		struct pollfd *desc = &effectives[i];
-		if (desc->revents) {
+		bool ack = desc->revents ||
+			t->poll_expiration == 0 ||
+			(t->poll_expiration > 0 && now >= t->poll_expiration);
+		if (ack) {
 			originals[i]->revents = desc->revents;
 			if (!t->poll_acked) {
 				list_remove(&t->list_elem);
@@ -293,7 +308,7 @@ void coroo_thread_exit() {
 	run_next_thread();
 }
 
-short coroo_poll_simple(int fd, short events, int timeout) {
+short coroo_poll_simple(int fd, short events, int64_t timeout) {
 	struct pollfd desc;
 	desc.fd = fd;
 	desc.events = events;
@@ -302,27 +317,14 @@ short coroo_poll_simple(int fd, short events, int timeout) {
 	return desc.revents;
 }
 
-void coroo_poll(struct pollfd *fds, nfds_t nfds, int timeout) {
+void coroo_poll(struct pollfd *fds, nfds_t nfds, int64_t timeout) {
 	current_thread->poll_descs = fds;
 	current_thread->poll_descs_count = nfds;
 	current_thread->poll_acked = false;
-	if (timeout == 0) {
-		current_thread->poll_expiration_type = POLL_EXPIRATION_IMMEDIATE;
-	} else if (timeout < 0) {
-		current_thread->poll_expiration_type = POLL_EXPIRATION_INFINITE;
-	} else {
-		current_thread->poll_expiration_type = POLL_EXPIRATION_SPECIFIED;
-		struct timespec *exp = &current_thread->poll_expiration;
-		clock_gettime(CLOCK_MONOTONIC, exp);
-		int seconds = timeout / 1000;
-		int millis = timeout % 1000;
-		exp->tv_sec += seconds;
-		exp->tv_nsec += millis * 1000000;
-		if (exp->tv_nsec >= 1000000000) {
-			exp->tv_sec += 1;
-			exp->tv_nsec -= 1000000000;
-		}
-	}
+	if (timeout > 0)
+		current_thread->poll_expiration = get_time_millis() + timeout;
+	else
+		current_thread->poll_expiration = timeout;
 	list_push_back(&waiting_threads, &current_thread->list_elem);
 	run_next_thread();
 }
