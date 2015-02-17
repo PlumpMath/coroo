@@ -15,7 +15,16 @@ typedef enum {
 	STACK_DIRECTION_DOWN,
 } StackDirection;
 
+typedef struct ListElement {
+	struct ListElement *prev, *next;
+} ListElement;
+
+typedef struct List {
+	struct ListElement anchor;
+} List;
+
 struct CorooThread {
+	ListElement list_elem;
 	void *stack_base;
 	size_t stack_size; // including guard page
 	CorooThreadFunction thread_function;
@@ -25,6 +34,26 @@ struct CorooThread {
 static StackDirection stack_direction = STACK_DIRECTION_UNKNOWN;
 static CorooThread main_thread;
 static CorooThread *current_thread;
+static List ready_threads;
+
+static void list_init(List *list) {
+	list->anchor.prev = &list->anchor;
+	list->anchor.next = &list->anchor;
+}
+
+static void list_push_front(List *list, ListElement *elem) {
+	elem->prev = &list->anchor;
+	elem->next = list->anchor.next;
+	elem->prev->next = elem;
+	elem->next->prev = elem;
+}
+
+static void list_push_back(List *list, ListElement *elem) {
+	elem->prev = list->anchor.prev;
+	elem->next = &list->anchor;
+	elem->prev->next = elem;
+	elem->next->prev = elem;
+}
 
 static void maybe_clobber_pointer(void **ptr) {
 	if (stack_direction == STACK_DIRECTION_UNKNOWN) {
@@ -105,9 +134,12 @@ void coroo_thread_init() {
 	// determine stack direction
 	int dummy;
 	determine_stack_direction(&dummy);
+	// initialize lists
+	list_init(&ready_threads);
 	// initialize main thread
 	memset(&main_thread, 0, sizeof(main_thread));
 	current_thread = &main_thread;
+	list_push_front(&ready_threads, &main_thread.list_elem);
 }
 
 CorooThread *coroo_thread_start(size_t stack_size,
