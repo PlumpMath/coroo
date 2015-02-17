@@ -6,6 +6,7 @@
 #include <setjmp.h>
 #include <string.h>
 #include <unistd.h>
+#include <poll.h>
 #include <setjmp.h>
 #include <sys/mman.h>
 
@@ -28,6 +29,9 @@ typedef struct List {
 struct CorooThread {
 	ListElement list_elem;
 	jmp_buf thread_state;
+	struct pollfd *poll_descs;
+	nfds_t poll_descs_count;
+	// initialized by coroo_thread_start
 	void *stack_base;
 	size_t stack_size; // including guard page
 	CorooThreadFunction thread_function;
@@ -43,7 +47,7 @@ static List waiting_threads;
 static List dead_threads;
 
 #define list_entry(elem, type, field) \
-	(type *)((uintptr_t)elem - offsetof(type, field))
+	((type *)((uintptr_t)elem - offsetof(type, field)))
 
 static void list_init(List *list) {
 	list->anchor.prev = &list->anchor;
@@ -169,8 +173,13 @@ static void run_next_thread() {
 		if (setjmp(self->thread_state) == 0)
 			longjmp(next->thread_state, 1);
 	}
+	// do polling
+	nfds_t nfds = 0;
+	ListElement *e, *anchor = &waiting_threads.anchor;
+	for (e = anchor->next; e != anchor; e = e->next)
+		nfds += list_entry(e, CorooThread, list_elem)->poll_descs_count;
 	// no ready threads
-	printf("no ready threads!\n");
+	printf("no ready threads! fds=%d\n", nfds);
 	abort();
 }
 
@@ -231,5 +240,20 @@ CorooThread *coroo_thread_start(size_t stack_size,
 
 void coroo_thread_exit() {
 	list_push_back(&dead_threads, &current_thread->list_elem);
+	run_next_thread();
+}
+
+short coroo_poll_simple(int fd, short events) {
+	struct pollfd desc;
+	desc.fd = fd;
+	desc.events = events;
+	desc.revents = 0;
+	coroo_poll(&desc, 1);
+}
+
+void coroo_poll(struct pollfd *fds, nfds_t nfds) {
+	current_thread->poll_descs = fds;
+	current_thread->poll_descs_count = nfds;
+	list_push_back(&waiting_threads, &current_thread->list_elem);
 	run_next_thread();
 }
