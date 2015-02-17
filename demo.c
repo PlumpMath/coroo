@@ -21,7 +21,7 @@ void startthread_demo() {
 void basicpoll_thread(void *aux) {
 	while (true) {
 		printf("start poll\n");
-		coroo_poll_simple(0, POLLIN);
+		coroo_poll_simple(0, POLLIN, -1);
 		printf("poll complete\n");
 		char buf[512];
 		ssize_t cnt = read(0, buf, sizeof(buf));

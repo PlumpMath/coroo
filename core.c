@@ -7,6 +7,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <poll.h>
+#include <time.h>
 #include <setjmp.h>
 #include <sys/mman.h>
 
@@ -17,6 +18,12 @@ typedef enum {
 	STACK_DIRECTION_UP,
 	STACK_DIRECTION_DOWN,
 } StackDirection;
+
+typedef enum {
+	POLL_EXPIRATION_IMMEDIATE,
+	POLL_EXPIRATION_SPECIFIED,
+	POLL_EXPIRATION_INFINITE,
+} PollExpiration;
 
 typedef struct ListElement {
 	struct ListElement *prev, *next;
@@ -31,6 +38,8 @@ struct CorooThread {
 	jmp_buf thread_state;
 	struct pollfd *poll_descs;
 	nfds_t poll_descs_count;
+	PollExpiration poll_expiration_type;
+	struct timespec poll_expiration;
 	bool poll_acked;
 	// initialized by coroo_thread_start
 	void *stack_base;
@@ -285,18 +294,35 @@ void coroo_thread_exit() {
 	run_next_thread();
 }
 
-short coroo_poll_simple(int fd, short events) {
+short coroo_poll_simple(int fd, short events, int timeout) {
 	struct pollfd desc;
 	desc.fd = fd;
 	desc.events = events;
 	desc.revents = 0;
-	coroo_poll(&desc, 1);
+	coroo_poll(&desc, 1, timeout);
 	return desc.revents;
 }
 
-void coroo_poll(struct pollfd *fds, nfds_t nfds) {
+void coroo_poll(struct pollfd *fds, nfds_t nfds, int timeout) {
 	current_thread->poll_descs = fds;
 	current_thread->poll_descs_count = nfds;
+	if (timeout == 0) {
+		current_thread->poll_expiration_type = POLL_EXPIRATION_IMMEDIATE;
+	} else if (timeout < 0) {
+		current_thread->poll_expiration_type = POLL_EXPIRATION_INFINITE;
+	} else {
+		current_thread->poll_expiration_type = POLL_EXPIRATION_SPECIFIED;
+		struct timespec *exp = &current_thread->poll_expiration;
+		clock_gettime(CLOCK_MONOTONIC, exp);
+		int seconds = timeout / 1000;
+		int millis = timeout % 1000;
+		exp->tv_sec += seconds;
+		exp->tv_nsec += millis * 1000000;
+		if (exp->tv_nsec >= 1000000000) {
+			exp->tv_sec += 1;
+			exp->tv_nsec -= 1000000000;
+		}
+	}
 	list_push_back(&waiting_threads, &current_thread->list_elem);
 	run_next_thread();
 }

@@ -5,7 +5,7 @@ DEPS := $(SRCS:%.c=%.d)
 
 CC := gcc
 CFLAGS := -Os -g -Wall -std=c99 -D_GNU_SOURCE
-LDFLAGS :=
+LDFLAGS := -lrt
 
 all: coroo.a demo
 
