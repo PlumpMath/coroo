@@ -1,5 +1,4 @@
-SRCS := \
-	core.c
+SRCS := coroo.c
 OBJS := $(SRCS:%.c=%.o)
 DEPS := $(SRCS:%.c=%.d)
 
