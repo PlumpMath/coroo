@@ -5,6 +5,7 @@
 #include <setjmp.h>
 #include <string.h>
 #include <unistd.h>
+#include <setjmp.h>
 #include <sys/mman.h>
 
 #include "coroo.h"
@@ -25,6 +26,7 @@ typedef struct List {
 
 struct CorooThread {
 	ListElement list_elem;
+	jmp_buf thread_state;
 	void *stack_base;
 	size_t stack_size; // including guard page
 	CorooThreadFunction thread_function;
@@ -32,9 +34,11 @@ struct CorooThread {
 };
 
 static StackDirection stack_direction = STACK_DIRECTION_UNKNOWN;
+
 static CorooThread main_thread;
 static CorooThread *current_thread;
 static List ready_threads;
+static List waiting_threads;
 
 static void list_init(List *list) {
 	list->anchor.prev = &list->anchor;
@@ -92,6 +96,10 @@ static void determine_stack_direction(void *prev) {
 }
 
 static void thread_invoke_function_actual(CorooThread *thread, char *filler) {
+	// return control
+	if (setjmp(thread->thread_state) == 0)
+		longjmp(current_thread->thread_state, 1);
+	// run!
 	thread->thread_function(thread->thread_argument);
 	// must not return
 	printf("thread function returned\n");
@@ -139,7 +147,6 @@ void coroo_thread_init() {
 	// initialize main thread
 	memset(&main_thread, 0, sizeof(main_thread));
 	current_thread = &main_thread;
-	list_push_front(&ready_threads, &main_thread.list_elem);
 }
 
 CorooThread *coroo_thread_start(size_t stack_size,
@@ -167,13 +174,14 @@ CorooThread *coroo_thread_start(size_t stack_size,
 	thread->stack_size = stack_size;
 	thread->thread_function = thread_function;
 	thread->thread_argument = thread_argument;
-	// run the thread
+	// initialize the thread
 	size_t jump;
 	if (stack_direction == STACK_DIRECTION_DOWN)
 		jump = (uintptr_t)&thread - ((uintptr_t)stack_base + stack_size - page_size);
 	else
 		jump = ((uintptr_t)stack_base + page_size) - (uintptr_t)&jump;
-	thread_start_helper(thread, jump);
+	if (setjmp(current_thread->thread_state) == 0)
+		thread_start_helper(thread, jump);
 	// return the thread
 	return thread;
 }

@@ -21,9 +21,9 @@ clean:
 	@gcc -MM -MT $(patsubst %.c,%.o,$<) -MT $@ -MF $@ $<
 
 coroo.a: $(OBJS)
-	ar rc $@ $^
+	ar rcs $@ $^
 
-demo: coroo.a demo.o
+demo: demo.o coroo.a
 	$(CC) $(CFLAGS) $(LDFLAGS) $^ -o $@
 
 -include $(DEPS)
