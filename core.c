@@ -133,11 +133,7 @@ static void determine_stack_direction(void *prev) {
 }
 
 static void thread_invoke_function_actual(char *filler) {
-	// return control
-	run_next_thread();
-	// run!
 	current_thread->thread_function(current_thread->thread_argument);
-	// must not return
 	coroo_thread_exit();
 }
 
@@ -300,8 +296,6 @@ CorooThread *coroo_thread_start(size_t stack_size,
 		current_thread = thread;
 		thread_start_helper(jump);
 	}
-	// mark it as ready
-	list_push_back(&ready_threads, &thread->list_elem);
 	// return the thread
 	return thread;
 }
