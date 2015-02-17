@@ -289,13 +289,13 @@ CorooThread *coroo_thread_start(size_t stack_size,
 	void *stack_base = mmap(NULL, stack_size, PROT_READ | PROT_WRITE,
 			MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 	if (!stack_base)
-		fputs("warning: failed to map memory for stack\n", stderr);
+		fprintf(stderr, "warning: failed to map memory for stack: %m\n");
 	// make guard page
 	void *guard_start = stack_direction == STACK_DIRECTION_DOWN ?
 		stack_base :
 		(void *)((uintptr_t)stack_base + stack_size - page_size);
-	if (mprotect(guard_start, page_size, PROT_NONE) != 0)
-		fputs("warning: failed to set guard page\n", stderr);
+	if (mprotect(guard_start, page_size, PROT_NONE) < 0)
+		fprintf(stderr, "failed to set guard page: %m\n");
 	// initialize the thread
 	CorooThread *thread = malloc(sizeof(*thread));
 	thread->stack_base = stack_base;
