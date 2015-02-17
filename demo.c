@@ -8,7 +8,7 @@
 
 void startthread_thread(void *aux) {
 	while (true) {
-		printf("startthread works!");
+		printf("startthread works!\n");
 		sleep(1);
 	}
 }
