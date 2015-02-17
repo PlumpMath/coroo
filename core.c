@@ -22,8 +22,9 @@ struct CorooThread {
 	void *thread_argument;
 };
 
-StackDirection stack_direction = STACK_DIRECTION_UNKNOWN;
-CorooThread main_thread;
+static StackDirection stack_direction = STACK_DIRECTION_UNKNOWN;
+static CorooThread main_thread;
+static CorooThread *current_thread;
 
 static void maybe_clobber_pointer(void **ptr) {
 	if (stack_direction == STACK_DIRECTION_UNKNOWN) {
@@ -106,6 +107,7 @@ void coroo_thread_init() {
 	determine_stack_direction(&dummy);
 	// initialize main thread
 	memset(&main_thread, 0, sizeof(main_thread));
+	current_thread = &main_thread;
 }
 
 CorooThread *coroo_thread_start(size_t stack_size,
