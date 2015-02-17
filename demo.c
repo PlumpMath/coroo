@@ -1,14 +1,21 @@
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "coroo.h"
 
 void startthread_thread(void *aux) {
+	while (true) {
+		printf("startthread works!");
+		sleep(1);
+	}
 }
 
 void startthread_demo() {
 	coroo_thread_start(65536, startthread_thread, NULL);
+	coroo_thread_exit();
 }
 
 int main(int argc, char *argv[]) {
