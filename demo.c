@@ -59,6 +59,7 @@ void chainstart_thread(void *aux) {
 	int id = *(int *)aux;
 	printf("thread %d started!\n", id);
 	id++;
+	coroo_thread_yield();
 	coroo_thread_start(65536, chainstart_thread, &id);
 	coroo_thread_exit();
 }

@@ -227,6 +227,17 @@ static void wait_for_events() {
 	free(effectives);
 }
 
+static void reap_dead_threads() {
+	while (!list_empty(&dead_threads)) {
+		CorooThread *t = list_entry(
+				list_pop_front(&dead_threads),
+				CorooThread,
+				list_elem);
+		munmap(t->stack_base, t->stack_size);
+		free(t);
+	}
+}
+
 static void run_next_thread() {
 	while (list_empty(&ready_threads))
 		wait_for_events();
@@ -242,6 +253,8 @@ static void run_next_thread() {
 		current_thread = next_thread;
 		longjmp(next_thread->thread_state, 1);
 	}
+	// clean up
+	reap_dead_threads();
 }
 
 void coroo_thread_init() {
