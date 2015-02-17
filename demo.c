@@ -55,6 +55,20 @@ void fastyield_demo() {
 	coroo_thread_exit();
 }
 
+void chainstart_thread(void *aux) {
+	int id = *(int *)aux;
+	printf("thread %d started!\n", id);
+	id++;
+	coroo_thread_start(65536, chainstart_thread, &id);
+	coroo_thread_exit();
+}
+
+void chainstart_demo() {
+	int id = 1;
+	coroo_thread_start(65536, chainstart_thread, &id);
+	coroo_thread_exit();
+}
+
 int main(int argc, char *argv[]) {
 	coroo_thread_init();
 	if (argc < 2) {
@@ -68,6 +82,8 @@ int main(int argc, char *argv[]) {
 		basicpoll_demo();
 	} else if (strcmp(demo_name, "fastyield") == 0) {
 		fastyield_demo();
+	} else if (strcmp(demo_name, "chainstart") == 0) {
+		chainstart_demo();
 	} else {
 		fprintf(stderr, "unknown demo name!\n");
 		return EXIT_FAILURE;
