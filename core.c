@@ -132,30 +132,30 @@ static void determine_stack_direction(void *prev) {
 	func(prev);
 }
 
-static void thread_invoke_function_actual(CorooThread *thread, char *filler) {
+static void thread_invoke_function_actual(char *filler) {
 	// return control
 	run_next_thread();
 	// run!
-	thread->thread_function(thread->thread_argument);
+	current_thread->thread_function(current_thread->thread_argument);
 	// must not return
 	coroo_thread_exit();
 }
 
-static void thread_invoke_function(CorooThread *thread, char *filler) {
-	void (*func)(CorooThread *, char *) = thread_invoke_function_actual;
+static void thread_invoke_function(char *filler) {
+	void (*func)(char *) = thread_invoke_function_actual;
 	maybe_clobber_pointer((void **)&func);
-	func(thread, filler);
+	func(filler);
 }
 
-static void thread_start_helper_actual(CorooThread *thread, size_t jump) {
+static void thread_start_helper_actual(size_t jump) {
 	char filler[jump];
-	thread_invoke_function(thread, filler);
+	thread_invoke_function(filler);
 }
 
-static void thread_start_helper(CorooThread *thread, size_t jump) {
-	void (*func)(CorooThread *, size_t) = thread_start_helper_actual;
+static void thread_start_helper(size_t jump) {
+	void (*func)(size_t) = thread_start_helper_actual;
 	maybe_clobber_pointer((void **)&func);
-	func(thread, jump);
+	func(jump);
 }
 
 static size_t get_page_size() {
@@ -298,7 +298,7 @@ CorooThread *coroo_thread_start(size_t stack_size,
 	list_push_front(&ready_threads, &current_thread->list_elem);
 	if (setjmp(current_thread->thread_state) == 0) {
 		current_thread = thread;
-		thread_start_helper(thread, jump);
+		thread_start_helper(jump);
 	}
 	// mark it as ready
 	list_push_back(&ready_threads, &thread->list_elem);
