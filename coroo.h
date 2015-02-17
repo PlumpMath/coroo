@@ -1,3 +1,5 @@
+#include <sys/types.h>
+
 typedef struct CorooThread CorooThread;
 typedef void (*CorooThreadFunction)(void *);
 
