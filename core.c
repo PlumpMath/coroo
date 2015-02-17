@@ -183,6 +183,8 @@ void coroo_thread_init() {
 	determine_stack_direction(&dummy);
 	// initialize lists
 	list_init(&ready_threads);
+	list_init(&waiting_threads);
+	list_init(&dead_threads);
 	// initialize main thread
 	memset(&main_thread, 0, sizeof(main_thread));
 	current_thread = &main_thread;
