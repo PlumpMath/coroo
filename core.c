@@ -1,4 +1,5 @@
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -39,10 +40,24 @@ static CorooThread main_thread;
 static CorooThread *current_thread;
 static List ready_threads;
 static List waiting_threads;
+static List dead_threads;
+
+#define list_entry(elem, type, field) \
+	(type *)((uintptr_t)elem - offsetof(type, field))
 
 static void list_init(List *list) {
 	list->anchor.prev = &list->anchor;
 	list->anchor.next = &list->anchor;
+}
+
+static bool list_empty(List *list) {
+	return list->anchor.prev == list->anchor.next;
+}
+
+static ListElement *list_remove(ListElement *elem) {
+	elem->prev->next = elem->next;
+	elem->next->prev = elem->prev;
+	return elem;
 }
 
 static void list_push_front(List *list, ListElement *elem) {
@@ -57,6 +72,14 @@ static void list_push_back(List *list, ListElement *elem) {
 	elem->next = &list->anchor;
 	elem->prev->next = elem;
 	elem->next->prev = elem;
+}
+
+static ListElement *list_pop_front(List *list) {
+	return list_remove(list->anchor.next);
+}
+
+static ListElement *list_pop_back(List *list) {
+	return list_remove(list->anchor.prev);
 }
 
 static void maybe_clobber_pointer(void **ptr) {
@@ -102,8 +125,7 @@ static void thread_invoke_function_actual(CorooThread *thread, char *filler) {
 	// run!
 	thread->thread_function(thread->thread_argument);
 	// must not return
-	printf("thread function returned\n");
-	abort();
+	coroo_thread_exit();
 }
 
 static void thread_invoke_function(CorooThread *thread, char *filler) {
@@ -133,6 +155,23 @@ static size_t get_page_size() {
 		}
 	}
 	return cached;
+}
+
+static void run_next_thread() {
+	while (!list_empty(&ready_threads)) {
+		CorooThread *self = current_thread;
+		CorooThread *next = list_entry(
+				list_pop_front(&ready_threads),
+				CorooThread,
+				list_elem);
+		// do context switch
+		current_thread = next;
+		if (setjmp(self->thread_state) == 0)
+			longjmp(next->thread_state, 1);
+	}
+	// no ready threads
+	printf("no ready threads!");
+	abort();
 }
 
 void coroo_thread_init() {
@@ -174,7 +213,7 @@ CorooThread *coroo_thread_start(size_t stack_size,
 	thread->stack_size = stack_size;
 	thread->thread_function = thread_function;
 	thread->thread_argument = thread_argument;
-	// initialize the thread
+	// initialize the thread state
 	size_t jump;
 	if (stack_direction == STACK_DIRECTION_DOWN)
 		jump = (uintptr_t)&thread - ((uintptr_t)stack_base + stack_size - page_size);
@@ -182,6 +221,13 @@ CorooThread *coroo_thread_start(size_t stack_size,
 		jump = ((uintptr_t)stack_base + page_size) - (uintptr_t)&jump;
 	if (setjmp(current_thread->thread_state) == 0)
 		thread_start_helper(thread, jump);
+	// mark it as ready
+	list_push_back(&ready_threads, &thread->list_elem);
 	// return the thread
 	return thread;
+}
+
+void coroo_thread_exit() {
+	list_push_back(&dead_threads, &current_thread->list_elem);
+	run_next_thread();
 }
