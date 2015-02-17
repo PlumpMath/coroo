@@ -31,6 +31,7 @@ struct CorooThread {
 	jmp_buf thread_state;
 	struct pollfd *poll_descs;
 	nfds_t poll_descs_count;
+	bool poll_acked;
 	// initialized by coroo_thread_start
 	void *stack_base;
 	size_t stack_size; // including guard page
@@ -162,25 +163,65 @@ static size_t get_page_size() {
 }
 
 static void run_next_thread() {
-	while (!list_empty(&ready_threads)) {
+	if (!list_empty(&ready_threads)) {
 		CorooThread *self = current_thread;
 		CorooThread *next = list_entry(
 				list_pop_front(&ready_threads),
 				CorooThread,
 				list_elem);
-		// do context switch
-		current_thread = next;
-		if (setjmp(self->thread_state) == 0)
-			longjmp(next->thread_state, 1);
+		if (self != next) {
+			// do context switch
+			current_thread = next;
+			if (setjmp(self->thread_state) == 0)
+				longjmp(next->thread_state, 1);
+		}
+		return;
 	}
-	// do polling
+	// count number of descriptors
 	nfds_t nfds = 0;
 	ListElement *e, *anchor = &waiting_threads.anchor;
-	for (e = anchor->next; e != anchor; e = e->next)
-		nfds += list_entry(e, CorooThread, list_elem)->poll_descs_count;
-	// no ready threads
-	printf("no ready threads! fds=%d\n", nfds);
-	abort();
+	for (e = anchor->next; e != anchor; e = e->next) {
+		CorooThread *t = list_entry(e, CorooThread, list_elem);
+		nfds += t->poll_descs_count;
+		t->poll_acked = false;
+	}
+	// allocate descriptor table
+	CorooThread **threads = malloc(nfds * sizeof(*threads));
+	struct pollfd **originals = malloc(nfds * sizeof(*originals));
+	struct pollfd *effectives = malloc(nfds * sizeof(*effectives));
+	// populate tables
+	nfds_t i = 0;
+	for (e = anchor->next; e != anchor; e = e->next) {
+		CorooThread *t = list_entry(e, CorooThread, list_elem);
+		for (nfds_t j = 0; j < t->poll_descs_count; j++, i++) {
+			struct pollfd *desc = &t->poll_descs[j];
+			desc->revents = 0;
+			threads[i] = t;
+			originals[i] = desc;
+			effectives[i] = *desc;
+		}
+	}
+	// do the poll
+	poll(effectives, nfds, -1);
+	// dispatch results
+	for (i = 0; i < nfds; i++) {
+		CorooThread *t = threads[i];
+		struct pollfd *desc = &effectives[i];
+		if (desc->revents) {
+			originals[i]->revents = desc->revents;
+			if (!t->poll_acked) {
+				list_remove(&t->list_elem);
+				list_push_back(&ready_threads, &t->list_elem);
+				t->poll_acked = true;
+			}
+		}
+	}
+	// clean up
+	free(threads);
+	free(originals);
+	free(effectives);
+	// start again
+	run_next_thread();
 }
 
 void coroo_thread_init() {
@@ -219,7 +260,7 @@ CorooThread *coroo_thread_start(size_t stack_size,
 	if (mprotect(guard_start, page_size, PROT_NONE) != 0)
 		fputs("warning: failed to set guard page\n", stderr);
 	// initialize the thread
-	CorooThread *thread = malloc(sizeof(CorooThread));
+	CorooThread *thread = malloc(sizeof(*thread));
 	thread->stack_base = stack_base;
 	thread->stack_size = stack_size;
 	thread->thread_function = thread_function;
@@ -249,6 +290,7 @@ short coroo_poll_simple(int fd, short events) {
 	desc.events = events;
 	desc.revents = 0;
 	coroo_poll(&desc, 1);
+	return desc.revents;
 }
 
 void coroo_poll(struct pollfd *fds, nfds_t nfds) {
