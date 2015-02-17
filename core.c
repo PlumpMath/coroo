@@ -51,7 +51,7 @@ static void list_init(List *list) {
 }
 
 static bool list_empty(List *list) {
-	return list->anchor.prev == list->anchor.next;
+	return list->anchor.next == &list->anchor;
 }
 
 static ListElement *list_remove(ListElement *elem) {
@@ -170,7 +170,7 @@ static void run_next_thread() {
 			longjmp(next->thread_state, 1);
 	}
 	// no ready threads
-	printf("no ready threads!");
+	printf("no ready threads!\n");
 	abort();
 }
 
