@@ -8,6 +8,7 @@ void coroo_thread_init();
 CorooThread *coroo_thread_start(size_t stack_size,
 		CorooThreadFunction thread_function,
 		void *thread_argument);
+void coroo_thread_yield();
 void coroo_thread_exit();
 
 short coroo_poll_simple(int fd, short events, int64_t timeout);

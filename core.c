@@ -303,6 +303,11 @@ CorooThread *coroo_thread_start(size_t stack_size,
 	return thread;
 }
 
+void coroo_thread_yield() {
+	list_push_back(&ready_threads, &current_thread->list_elem);
+	run_next_thread();
+}
+
 void coroo_thread_exit() {
 	list_push_back(&dead_threads, &current_thread->list_elem);
 	run_next_thread();
