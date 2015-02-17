@@ -217,12 +217,12 @@ static void run_next_thread() {
 			list_pop_front(&ready_threads),
 			CorooThread,
 			list_elem);
-	if (self != next) {
-		// do context switch
-		current_thread = next;
-		if (setjmp(self->thread_state) == 0)
-			longjmp(next->thread_state, 1);
-	}
+	if (self == next)
+		return;
+	// do context switch
+	current_thread = next;
+	if (setjmp(self->thread_state) == 0)
+		longjmp(next->thread_state, 1);
 }
 
 void coroo_thread_init() {
