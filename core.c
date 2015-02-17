@@ -8,7 +8,6 @@
 #include <unistd.h>
 #include <poll.h>
 #include <time.h>
-#include <setjmp.h>
 #include <sys/mman.h>
 
 #include "coroo.h"
@@ -51,6 +50,8 @@ static List dead_threads;
 
 #define list_entry(elem, type, field) \
 	((type *)((uintptr_t)elem - offsetof(type, field)))
+
+static void run_next_thread();
 
 static void list_init(List *list) {
 	list->anchor.prev = &list->anchor;
@@ -133,8 +134,7 @@ static void determine_stack_direction(void *prev) {
 
 static void thread_invoke_function_actual(CorooThread *thread, char *filler) {
 	// return control
-	if (setjmp(thread->thread_state) == 0)
-		longjmp(current_thread->thread_state, 1);
+	run_next_thread();
 	// run!
 	thread->thread_function(thread->thread_argument);
 	// must not return
@@ -235,17 +235,17 @@ static void run_next_thread() {
 	while (list_empty(&ready_threads))
 		wait_for_events();
 	// something's ready to run!
-	CorooThread *self = current_thread;
-	CorooThread *next = list_entry(
+	CorooThread *next_thread = list_entry(
 			list_pop_front(&ready_threads),
 			CorooThread,
 			list_elem);
-	if (self == next)
+	if (current_thread == next_thread)
 		return;
 	// do context switch
-	current_thread = next;
-	if (setjmp(self->thread_state) == 0)
-		longjmp(next->thread_state, 1);
+	if (setjmp(current_thread->thread_state) == 0) {
+		current_thread = next_thread;
+		longjmp(next_thread->thread_state, 1);
+	}
 }
 
 void coroo_thread_init() {
@@ -295,8 +295,11 @@ CorooThread *coroo_thread_start(size_t stack_size,
 		jump = (uintptr_t)&thread - ((uintptr_t)stack_base + stack_size - page_size);
 	else
 		jump = ((uintptr_t)stack_base + page_size) - (uintptr_t)&jump;
-	if (setjmp(current_thread->thread_state) == 0)
+	list_push_front(&ready_threads, &current_thread->list_elem);
+	if (setjmp(current_thread->thread_state) == 0) {
+		current_thread = thread;
 		thread_start_helper(thread, jump);
+	}
 	// mark it as ready
 	list_push_back(&ready_threads, &thread->list_elem);
 	// return the thread
