@@ -233,8 +233,10 @@ static void reap_dead_threads() {
 				list_pop_front(&dead_threads),
 				CorooThread,
 				list_elem);
-		munmap(t->stack_base, t->stack_size);
-		free(t);
+		if (t != &main_thread) {
+			munmap(t->stack_base, t->stack_size);
+			free(t);
+		}
 	}
 }
 
