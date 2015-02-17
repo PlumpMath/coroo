@@ -65,6 +65,8 @@ static bool list_empty(List *list) {
 static ListElement *list_remove(ListElement *elem) {
 	elem->prev->next = elem->next;
 	elem->next->prev = elem->prev;
+	elem->prev = NULL;
+	elem->next = NULL;
 	return elem;
 }
 
