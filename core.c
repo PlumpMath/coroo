@@ -162,21 +162,7 @@ static size_t get_page_size() {
 	return cached;
 }
 
-static void run_next_thread() {
-	if (!list_empty(&ready_threads)) {
-		CorooThread *self = current_thread;
-		CorooThread *next = list_entry(
-				list_pop_front(&ready_threads),
-				CorooThread,
-				list_elem);
-		if (self != next) {
-			// do context switch
-			current_thread = next;
-			if (setjmp(self->thread_state) == 0)
-				longjmp(next->thread_state, 1);
-		}
-		return;
-	}
+static void wait_for_events() {
 	// count number of descriptors
 	nfds_t nfds = 0;
 	ListElement *e, *anchor = &waiting_threads.anchor;
@@ -220,8 +206,23 @@ static void run_next_thread() {
 	free(threads);
 	free(originals);
 	free(effectives);
-	// start again
-	run_next_thread();
+}
+
+static void run_next_thread() {
+	while (list_empty(&ready_threads))
+		wait_for_events();
+	// something's ready to run!
+	CorooThread *self = current_thread;
+	CorooThread *next = list_entry(
+			list_pop_front(&ready_threads),
+			CorooThread,
+			list_elem);
+	if (self != next) {
+		// do context switch
+		current_thread = next;
+		if (setjmp(self->thread_state) == 0)
+			longjmp(next->thread_state, 1);
+	}
 }
 
 void coroo_thread_init() {
