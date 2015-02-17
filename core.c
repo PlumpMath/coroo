@@ -178,7 +178,6 @@ static void wait_for_events() {
 	for (e = anchor->next; e != anchor; e = e->next) {
 		CorooThread *t = list_entry(e, CorooThread, list_elem);
 		nfds += t->poll_descs_count;
-		t->poll_acked = false;
 	}
 	// allocate descriptor table
 	CorooThread **threads = malloc(nfds * sizeof(*threads));
@@ -306,6 +305,7 @@ short coroo_poll_simple(int fd, short events, int timeout) {
 void coroo_poll(struct pollfd *fds, nfds_t nfds, int timeout) {
 	current_thread->poll_descs = fds;
 	current_thread->poll_descs_count = nfds;
+	current_thread->poll_acked = false;
 	if (timeout == 0) {
 		current_thread->poll_expiration_type = POLL_EXPIRATION_IMMEDIATE;
 	} else if (timeout < 0) {
