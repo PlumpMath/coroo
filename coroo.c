@@ -134,20 +134,16 @@ static void determine_stack_direction(void *prev) {
 	func(prev);
 }
 
-static void thread_invoke_function_actual(char *filler) {
-	current_thread->thread_function(current_thread->thread_argument);
-	coroo_thread_exit();
-}
-
-static void thread_invoke_function(char *filler) {
-	void (*func)(char *) = thread_invoke_function_actual;
-	maybe_clobber_pointer((void **)&func);
-	func(filler);
-}
-
 static void thread_start_helper_actual(size_t jump) {
-	char filler[jump];
-	thread_invoke_function(filler);
+	union {
+		char filler[jump];
+		void *clobbered;
+	} filler;
+	maybe_clobber_pointer(&filler.clobbered);
+	current_thread->thread_function(current_thread->thread_argument);
+	maybe_clobber_pointer(&filler.clobbered);
+	coroo_thread_exit();
+	maybe_clobber_pointer(&filler.clobbered);
 }
 
 static void thread_start_helper(size_t jump) {
