@@ -3,12 +3,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
-#include <setjmp.h>
 #include <string.h>
 #include <unistd.h>
 #include <poll.h>
 #include <time.h>
 #include <sys/mman.h>
+
+#define __USE_FORTIFY_LEVEL_OLD __USE_FORTIFY_LEVEL
+#undef __USE_FORTIFY_LEVEL
+#include <setjmp.h>
+#define __USE_FORTIFY_LEVEL __USE_FORTIFY_LEVEL_OLD
+#undef __USE_FORTIFY_LEVEL_OLD
 
 #include <valgrind/valgrind.h>
 
