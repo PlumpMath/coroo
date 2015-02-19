@@ -70,12 +70,14 @@ static ListElement *list_remove(ListElement *elem) {
 	return elem;
 }
 
+#if 0
 static void list_push_front(List *list, ListElement *elem) {
 	elem->prev = &list->anchor;
 	elem->next = list->anchor.next;
 	elem->prev->next = elem;
 	elem->next->prev = elem;
 }
+#endif
 
 static void list_push_back(List *list, ListElement *elem) {
 	elem->prev = list->anchor.prev;
@@ -88,9 +90,11 @@ static ListElement *list_pop_front(List *list) {
 	return list_remove(list->anchor.next);
 }
 
+#if 0
 static ListElement *list_pop_back(List *list) {
 	return list_remove(list->anchor.prev);
 }
+#endif
 
 static int64_t get_time_millis() {
 	struct timespec now;
@@ -300,7 +304,7 @@ CorooThread *coroo_thread_start(size_t stack_size,
 		jump = (uintptr_t)&thread - ((uintptr_t)stack_base + stack_size - page_size);
 	else
 		jump = ((uintptr_t)stack_base + page_size) - (uintptr_t)&jump;
-	list_push_front(&ready_threads, &current_thread->list_elem);
+	list_push_back(&ready_threads, &current_thread->list_elem);
 	if (setjmp(current_thread->thread_state) == 0) {
 		current_thread = thread;
 		thread_start_helper(jump);
