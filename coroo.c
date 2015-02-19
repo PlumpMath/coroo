@@ -188,7 +188,6 @@ static void wait_for_events() {
 		CorooThread *t = list_entry(e, CorooThread, list_elem);
 		for (nfds_t j = 0; j < t->poll_descs_count; j++, i++) {
 			struct pollfd *desc = &t->poll_descs[j];
-			desc->revents = 0;
 			threads[i] = t;
 			originals[i] = desc;
 			effectives[i] = *desc;
@@ -210,13 +209,11 @@ static void wait_for_events() {
 		struct pollfd *desc = &effectives[i];
 		bool ack = desc->revents ||
 			(t->poll_expiration >= 0 && now >= t->poll_expiration);
-		if (ack) {
-			originals[i]->revents = desc->revents;
-			if (!t->poll_acked) {
-				list_remove(&t->list_elem);
-				list_push_back(&ready_threads, &t->list_elem);
-				t->poll_acked = true;
-			}
+		originals[i]->revents = desc->revents;
+		if (ack && !t->poll_acked) {
+			list_remove(&t->list_elem);
+			list_push_back(&ready_threads, &t->list_elem);
+			t->poll_acked = true;
 		}
 	}
 	// clean up
