@@ -10,6 +10,8 @@
 #include <time.h>
 #include <sys/mman.h>
 
+#include <valgrind/valgrind.h>
+
 #include "coroo.h"
 
 typedef enum {
@@ -36,6 +38,7 @@ struct CorooThread {
 	// initialized by coroo_thread_start
 	void *stack_base;
 	size_t stack_size; // including guard page
+	unsigned int stack_id; // for valgrind
 	CorooThreadFunction thread_function;
 	void *thread_argument;
 };
@@ -231,6 +234,7 @@ static void reap_dead_threads() {
 				CorooThread,
 				list_elem);
 		if (t != &main_thread) {
+			VALGRIND_STACK_DEREGISTER(t->stack_id);
 			if (use_mmap)
 				munmap(t->stack_base, t->stack_size);
 			else
@@ -304,6 +308,8 @@ CorooThread *coroo_thread_start(size_t stack_size,
 	CorooThread *thread = malloc(sizeof(*thread));
 	thread->stack_base = stack_base;
 	thread->stack_size = stack_size;
+	thread->stack_id = VALGRIND_STACK_REGISTER(stack_base,
+			(void *)((uintptr_t)stack_base + stack_size));
 	thread->thread_function = thread_function;
 	thread->thread_argument = thread_argument;
 	// initialize the thread state
