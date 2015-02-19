@@ -40,6 +40,8 @@ struct CorooThread {
 	void *thread_argument;
 };
 
+static const bool use_mmap = true;
+
 static StackDirection stack_direction = STACK_DIRECTION_UNKNOWN;
 
 static CorooThread main_thread;
@@ -229,7 +231,10 @@ static void reap_dead_threads() {
 				CorooThread,
 				list_elem);
 		if (t != &main_thread) {
-			munmap(t->stack_base, t->stack_size);
+			if (use_mmap)
+				munmap(t->stack_base, t->stack_size);
+			else
+				free(t->stack_base);
 			free(t);
 		}
 	}
@@ -279,16 +284,22 @@ CorooThread *coroo_thread_start(size_t stack_size,
 	stack_size = (stack_size + page_size - 1) & page_mask;
 	stack_size += page_size * 2; // guard page and margin page
 	// try to map in stack pages
-	void *stack_base = mmap(NULL, stack_size, PROT_READ | PROT_WRITE,
-			MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	void *stack_base;
+	if (use_mmap)
+		stack_base = mmap(NULL, stack_size, PROT_READ | PROT_WRITE,
+				MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	else
+		stack_base = malloc(stack_size);
 	if (!stack_base)
 		fprintf(stderr, "warning: failed to map memory for stack: %m\n");
 	// make guard page
-	void *guard_start = stack_direction == STACK_DIRECTION_DOWN ?
-		stack_base :
-		(void *)((uintptr_t)stack_base + stack_size - page_size);
-	if (mprotect(guard_start, page_size, PROT_NONE) < 0)
-		fprintf(stderr, "failed to set guard page: %m\n");
+	if (use_mmap) {
+		void *guard_start = stack_direction == STACK_DIRECTION_DOWN ?
+			stack_base :
+			(void *)((uintptr_t)stack_base + stack_size - page_size);
+		if (mprotect(guard_start, page_size, PROT_NONE) < 0)
+			fprintf(stderr, "failed to set guard page: %m\n");
+	}
 	// initialize the thread
 	CorooThread *thread = malloc(sizeof(*thread));
 	thread->stack_base = stack_base;
