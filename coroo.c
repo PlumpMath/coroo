@@ -8,6 +8,8 @@
 #include <poll.h>
 #include <time.h>
 #include <sys/mman.h>
+#include <sys/uio.h>
+#include <sys/socket.h>
 
 #define __USE_FORTIFY_LEVEL_OLD __USE_FORTIFY_LEVEL
 #undef __USE_FORTIFY_LEVEL
@@ -18,6 +20,7 @@
 #include <valgrind/valgrind.h>
 
 #include "coroo.h"
+#include "refcnt.h"
 
 typedef enum {
 	STACK_DIRECTION_UNKNOWN,
@@ -361,4 +364,122 @@ void coroo_poll(struct pollfd *fds, nfds_t nfds, int64_t timeout) {
 		current_thread->poll_expiration = timeout;
 	list_push_back(&waiting_threads, &current_thread->list_elem);
 	run_next_thread();
+}
+
+struct CorooBufIO {
+	size_t buffer_size;
+	struct pollfd *poll_desc;
+	char *incoming; // circular buffer
+	size_t incoming_start;
+	size_t incoming_length;
+	char *outgoing; // circular buffer
+	size_t outgoing_start;
+	size_t outgoing_length;
+};
+
+static void bufio_destructor(void *ptr) {
+	CorooBufIO *bio = ptr;
+	free(bio->incoming);
+	free(bio->outgoing);
+}
+
+static void bufio_reflag(CorooBufIO *bio) {
+	if (bio->incoming_length == 0)
+		bio->incoming_start = 0;
+	if (bio->outgoing_length == 0)
+		bio->outgoing_start = 0;
+	struct pollfd *pd = bio->poll_desc;
+	if (bio->incoming_length < bio->buffer_size)
+		pd->events |= POLLIN;
+	else
+		pd->events &= ~POLLIN;
+	if (bio->outgoing_length > 0)
+		pd->events |= POLLOUT;
+	else
+		pd->events &= ~POLLOUT;
+}
+
+static size_t bufio_wrap(CorooBufIO *bio, size_t sz) {
+	if (sz >= bio->buffer_size)
+		return sz - bio->buffer_size;
+	else
+		return sz;
+}
+
+CorooBufIO *coroo_bufio_create(size_t buffer_size, struct pollfd *poll_desc) {
+	CorooBufIO *bio = refcnt_create(sizeof(*bio), bufio_destructor);
+	*bio = (CorooBufIO){};
+	bio->buffer_size = buffer_size;
+	bio->poll_desc = poll_desc;
+	bio->incoming = malloc(buffer_size);
+	bio->outgoing = malloc(buffer_size);
+	bufio_reflag(bio);
+	return bio;
+}
+
+short coroo_bufio_update(CorooBufIO *bio) {
+	struct pollfd *pd = bio->poll_desc;
+	if (pd->revents & (POLLHUP | POLLERR))
+		return pd->revents & (POLLHUP | POLLERR);
+	if ((pd->revents & POLLIN) && bio->incoming_length < bio->buffer_size) {
+		pd->revents &= ~POLLIN;
+		size_t start = bufio_wrap(bio, bio->incoming_start + bio->incoming_length);
+		size_t end = bio->incoming_start ? bio->incoming_start : bio->buffer_size;
+		ssize_t cnt, cnt2;
+		if (start < end) {
+			cnt = recv(pd->fd, bio->incoming + start, end - start, 0);
+		} else {
+			cnt = recv(pd->fd, bio->incoming + start, bio->buffer_size - start, 0);
+			cnt2 = recv(pd->fd, bio->incoming, end, 0);
+			if (cnt2 > 0)
+				cnt += cnt2;
+		}
+		bio->incoming_length += cnt;
+		if (cnt == 0)
+			return POLLHUP;
+	}
+	if ((pd->revents & POLLOUT) && bio->outgoing_length > 0) {
+		pd->revents &= ~POLLOUT;
+		size_t start = bio->outgoing_start;
+		size_t end = bufio_wrap(bio, bio->outgoing_start + bio->outgoing_length);
+		ssize_t cnt, cnt2;
+		if (start < end) {
+			cnt = send(pd->fd, bio->outgoing + start, end - start, 0);
+		} else {
+			cnt = send(pd->fd, bio->outgoing + start, bio->buffer_size - start, 0);
+			cnt2 = send(pd->fd, bio->outgoing, end, 0);
+			if (cnt2 > 0)
+				cnt += cnt2;
+		}
+		bio->outgoing_start += cnt;
+		bio->outgoing_length -= cnt;
+		bio->outgoing_start = bufio_wrap(bio, bio->outgoing_start);
+		if (cnt == 0)
+			return POLLHUP;
+	}
+	bufio_reflag(bio);
+	return 0;
+}
+
+void coroo_bufio_tunnel(CorooBufIO *dst, CorooBufIO *src) {
+	size_t dst_available = dst->buffer_size - dst->outgoing_length;
+	size_t src_available = src->incoming_length;
+	size_t full_size = src_available < dst_available ?
+		src_available : dst_available;
+	while (full_size > 0) {
+		size_t dst_ptr = bufio_wrap(dst, dst->outgoing_start + dst->outgoing_length);
+		size_t src_ptr = src->incoming_start;
+		size_t dst_chunk = dst->buffer_size - dst_ptr;
+		size_t src_chunk = src->buffer_size - src_ptr;
+		size_t max_chunk = src_chunk < dst_chunk ? src_chunk : dst_chunk;
+		size_t chunk_size = max_chunk < full_size ? max_chunk : full_size;
+		memcpy(dst->outgoing + dst_ptr, src->incoming + src_ptr, chunk_size);
+		dst->outgoing_length += chunk_size;
+		src->incoming_start += chunk_size;
+		src->incoming_length -= chunk_size;
+		src->incoming_start = bufio_wrap(src, src->incoming_start);
+		full_size -= chunk_size;
+	}
+	bufio_reflag(dst);
+	bufio_reflag(src);
 }
