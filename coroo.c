@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
+#include <errno.h>
 #include <unistd.h>
 #include <poll.h>
 #include <time.h>
@@ -361,4 +362,43 @@ void coroo_poll(struct pollfd *fds, nfds_t nfds, int64_t timeout) {
 		current_thread->poll_expiration = timeout;
 	list_push_back(&waiting_threads, &current_thread->list_elem);
 	run_next_thread();
+}
+
+typedef ssize_t (*coroo_rw_func)(int, void *, size_t);
+
+static ssize_t coroo_rw(int fd, void *buf_, size_t count,
+		ssize_t (*func)(int, void *, size_t),
+		bool partial) {
+	char *buf = buf_;
+	while (count > 0) {
+		ssize_t res = func(fd, buf, count);
+		if (res > 0) {
+			buf += res;
+			count -= res;
+			continue;
+		} else if (res == 0 || (partial && buf != buf_)) {
+			break;
+		} else if (errno == EAGAIN || errno == EWOULDBLOCK) {
+			coroo_poll_simple(fd, POLLIN, -1);
+		} else {
+			return -1;
+		}
+	}
+	return buf - (char *)buf_;
+}
+
+ssize_t coroo_read(int fd, void *buf, size_t count) {
+	return coroo_rw(fd, buf, count, read, true);
+}
+
+ssize_t coroo_write(int fd, const void *buf, size_t count) {
+	return coroo_rw(fd, (void *)buf, count, (coroo_rw_func)write, true);
+}
+
+ssize_t coroo_readall(int fd, void *buf, size_t count) {
+	return coroo_rw(fd, buf, count, read, false);
+}
+
+ssize_t coroo_writeall(int fd, const void *buf, size_t count) {
+	return coroo_rw(fd, (void *)buf, count, (coroo_rw_func)write, false);
 }
